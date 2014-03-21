@@ -9,7 +9,7 @@
 library(GenABEL)
 library(nFactors)
 library(CompQuadForm)
-
+#
 #-------------------------------------------------------------------------------
 # STEPs1-2 Checking for missing data and running fastlmm under the null model
 #
@@ -90,11 +90,14 @@ ASKAT <- function(Ped, Estim.Sigma.RG, Estim.Sigma.e, S, U) {
 	X = as.matrix(Ped[,3:dim(Ped)[2]])
 
 ##### STEP 1: Calculation of weights matrix W and the matrix K =GWG #####
-	freq.MAF = apply(X, 2, mean)/2
+ptm <- proc.time()	
+freq.MAF = apply(X, 2, mean)/2
     Geno.no.sparse = which(!freq.MAF==0)
     X = X[,Geno.no.sparse]
     freq.MAF = apply(X, 2, mean)/2
-    
+print("time for MAF computation")
+print(proc.time()-ptm)
+
 	if( length(freq.MAF) == 1){
 		w = (dbeta(freq.MAF, 1, 25))^2
 		K = w * X %*% t(X)
@@ -108,27 +111,67 @@ ASKAT <- function(Ped, Estim.Sigma.RG, Estim.Sigma.e, S, U) {
 	}
 
 	##### STEP 2: ASKAT score test statistic calculations #####
-	Gamma = Estim.Sigma.RG / Estim.Sigma.e
-	D.0 = (Gamma * S)  + diag(1, dim(X)[1], dim(X)[1])
-	inv.sqrt.D.0 = diag(1/sqrt(diag(D.0)))
+	
+  #ptm <- proc.time()  
+  #Gamma = Estim.Sigma.RG / Estim.Sigma.e
+	#D.0 = (Gamma * S)  + diag(1, dim(X)[1], dim(X)[1])
+	#inv.sqrt.D.0 = diag(1/sqrt(diag(D.0)))
 
-	K.tilde = inv.sqrt.D.0 %*% t(U)
+	#K.tilde = inv.sqrt.D.0 %*% t(U)
 
-	un.n = c(rep(1,dim(U)[1]))
-	X.tilde = K.tilde %*% un.n
-	Y.tilde = K.tilde %*% Y.trait
+	#un.n = c(rep(1,dim(U)[1]))
+	#X.tilde = K.tilde %*% un.n
+	#Y.tilde = K.tilde %*% Y.trait
 
-	K.tilde =  K.tilde %*% K %*% t(K.tilde)
+	#K.tilde =  K.tilde %*% K %*% t(K.tilde)
+  #UPD remove solve - replace with 1/
+	#P.0.tilde = diag(1, dim(U)[1], dim(U)[2]) - ( X.tilde %*% solve( t(X.tilde) %*% X.tilde ) %*% t(X.tilde) )
+  #P.0.tilde = diag(1, dim(U)[1], dim(U)[2]) - X.tilde %*% (((1 / ((t(X.tilde) %*% X.tilde)[1,1])) %*% t(X.tilde)))
+  #res = P.0.tilde %*% Y.tilde
+	#s2 = Estim.Sigma.e
 
-	P.0.tilde = diag(1, dim(U)[1], dim(U)[2]) - ( X.tilde %*% solve( t(X.tilde) %*% X.tilde ) %*% t(X.tilde) )
-	res = P.0.tilde %*% Y.tilde
-	s2 = Estim.Sigma.e
+	#Q = t(res) %*% K.tilde
+	#Q = Q %*% res/(2 * s2)
+  #print("time for Q computation")
+  #print(proc.time()-ptm)
 
-	Q = t(res) %*% K.tilde
-	Q = Q %*% res/(2 * s2)
-	W1 = P.0.tilde %*% K.tilde
-	W1 = W1 %*% P.0.tilde/2
-	out = Get_PValue.Modif(W1, Q)
+  #calculation of Q with associativity property used: O( [Matrix %*% Matrix] %*% Vector) > O( Matrix %*% [Matrix %*% Vector]) 
+  #precomputation of most time sensitive elements
+  #ptm <- proc.time() 
+  Gamma = Estim.Sigma.RG / Estim.Sigma.e
+  UT<-t(U)
+  D.0 <- (Gamma * S)  + diag(1, dim(X)[1], dim(X)[1])
+  inv.sqrt.D.0 <- diag(1/sqrt(diag(D.0)))
+  inv.D.0 = diag(1/diag(D.0))
+  un.n <- c(rep(1,dim(U)[1]))
+  Z <- 1/(( t(un.n) %*% (U %*% (inv.D.0 %*% (UT %*% un.n))))[1,1]) 
+  X.tilde <- inv.sqrt.D.0 %*% (UT %*% un.n)
+  Y.tilde <- inv.sqrt.D.0 %*% (UT %*% Y.trait)
+  s2 = Estim.Sigma.e
+  P.0.tilde = (diag(1, dim(U)[1], dim(U)[2])) - (X.tilde %*% Z) %*% ((t(X.tilde)))
+  #K.tilde2 <- inv.sqrt.D.0 %*% (UT %*% (K %*% (U %*% inv.sqrt.D.0))) 
+  #W1 <- P.0.tilde %*% K.tilde2 %*% P.0.tilde
+  PDU <- P.0.tilde %*% inv.sqrt.D.0 %*% UT
+  PDUT <- t(PDU)
+  #W1 <- P.0.tilde %*% inv.sqrt.D.0 %*% UT %*% K %*% U %*% inv.sqrt.D.0 %*% P.0.tilde #55 s
+  W1 <- PDU %*% K %*% PDUT # 44 s
+
+  #P.0.tilde is symmetric
+  #res <- P.0.tilde %*% Y.tilde
+  Q <- (t(Y.tilde) %*% (W1 %*% Y.tilde))/(2 * s2)
+  #print("time for Q computation, after associativity update")
+  #print(proc.time()-ptm)
+
+  #print("Q, Q2, Q-Q2"); print(c(Q, Q2, Q-Q2))
+
+
+  #W1 = P.0.tilde %*% K.tilde
+	#W1 = W1 %*% P.0.tilde/2
+  #K.tilde = inv.sqrt.D.0 %*% UT
+  
+  #P.0.tilde = (diag(1, dim(U)[1], dim(U)[2])) - (X.tilde %*% Z) %*% ((t(X.tilde)))
+  #W1 = P.0.tilde %*% K.tilde2 %*% P.0.tilde/2#UPD: on average 0.5 s gain
+	out = Get_PValue.Modif(W1/2, Q)
 	pvalue.davies = out$p.value
 	lambda = out$lambda
 
@@ -167,8 +210,10 @@ Geno.FaST.LMM <- function(Geno, tpedFile){
 # Get lambda
 #-------------------------------------------------------------------------------
 Get_Lambda <- function (K) {
-	out.s <- eigen(K, symmetric = TRUE)
-	lambda1 <- out.s$values
+	#UPD: do not need eigenvectors
+  out.s <- eigen(K, symmetric = TRUE, only.values = TRUE)
+  #out.s <- eigen(K, symmetric = TRUE)
+  lambda1 <- out.s$values
 	IDX1 <- which(lambda1 >= 0)
 	IDX2 <- which(lambda1 > mean(lambda1[IDX1])/1e+05)
 	if (length(IDX2) == 0) {
@@ -353,8 +398,9 @@ path.FastLmm <- "fastlmmc"
 debug <- FALSE
 tmpDir <- '.'
 
-load("./kin1.Rdata")
-dataFile = "Ped_EX_ASKAT_NOMissdata.dat"
+#load("./kin2.Rdata"); dataFile = "PedB.dat"
+load("./kin1.Rdata"); dataFile = "Ped_EX_ASKAT_NOMissdata.dat"
+
 Ped  = read.csv(dataFile, sep="", header=FALSE );
 
 #------------             In thid STEP we Calculate:            ------------#
@@ -363,18 +409,30 @@ Ped  = read.csv(dataFile, sep="", header=FALSE );
 #------- It is The part of the program that should be done only once -------#
 Missing = FALSE # this is means that there is no missing data neither in the trait nor in the genotypes
 
+ptm <- proc.time()
 results.STEPs12 = STEPs12(Ped, kin1, Missing, tmpDir="." )
+print("Time for steps12")
+print(proc.time() - ptm)
+
 Estim.Sigma.RG = results.STEPs12$Estim.Sigma.RG
 Estim.Sigma.e = results.STEPs12$Estim.Sigma.e
+
 S = results.STEPs12$S
 U = results.STEPs12$U
 
 #--------- This is the main ASKAT function for a window of 5 SNPs--------#
 #------------- This is what you should loop for your windows-------------#
+
+ptm <- proc.time()
+Rprof("a1.out")
 res.ASKAT = ASKAT(Ped, Estim.Sigma.RG, Estim.Sigma.e, S, U)
+Rprof(NULL, interval=1/5000)
 res.ASKAT
-
-
+print("Time for ASKAT")
+print(proc.time() - ptm)
+library(profr)
+plot(parse_rprof("a1.out", interval=0.001))
+k1<-parse_rprof("a1.out", interval=0.001)
 
 
 
