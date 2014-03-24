@@ -3,7 +3,7 @@
 # ASKAT Package
 #
 # By: Karim Oualkacha
-#       																	2013
+# Optimized: Stepan Grinek      																	2013
 #-------------------------------------------------------------------------------
 
 library(GenABEL)
@@ -98,80 +98,88 @@ freq.MAF = apply(X, 2, mean)/2
 print("time for MAF computation")
 print(proc.time()-ptm)
 
-	if( length(freq.MAF) == 1){
-		w = (dbeta(freq.MAF, 1, 25))^2
-		K = w * X %*% t(X)
-	} else {
-		w = vector(length = length(freq.MAF))
-		for (i in 1:length(freq.MAF)){
-			w[i] = (dbeta(freq.MAF[i], 1, 25))^2
-		}
-		w = diag(w)
-		K = X %*% w %*% t(X)
-	}
-
-	##### STEP 2: ASKAT score test statistic calculations #####
-	
-  #ptm <- proc.time()  
-  #Gamma = Estim.Sigma.RG / Estim.Sigma.e
-	#D.0 = (Gamma * S)  + diag(1, dim(X)[1], dim(X)[1])
-	#inv.sqrt.D.0 = diag(1/sqrt(diag(D.0)))
-
-	#K.tilde = inv.sqrt.D.0 %*% t(U)
-
-	#un.n = c(rep(1,dim(U)[1]))
-	#X.tilde = K.tilde %*% un.n
-	#Y.tilde = K.tilde %*% Y.trait
-
-	#K.tilde =  K.tilde %*% K %*% t(K.tilde)
-  #UPD remove solve - replace with 1/
-	#P.0.tilde = diag(1, dim(U)[1], dim(U)[2]) - ( X.tilde %*% solve( t(X.tilde) %*% X.tilde ) %*% t(X.tilde) )
-  #P.0.tilde = diag(1, dim(U)[1], dim(U)[2]) - X.tilde %*% (((1 / ((t(X.tilde) %*% X.tilde)[1,1])) %*% t(X.tilde)))
-  #res = P.0.tilde %*% Y.tilde
-	#s2 = Estim.Sigma.e
-
-	#Q = t(res) %*% K.tilde
-	#Q = Q %*% res/(2 * s2)
-  #print("time for Q computation")
-  #print(proc.time()-ptm)
-
-  #calculation of Q with associativity property used: O( [Matrix %*% Matrix] %*% Vector) > O( Matrix %*% [Matrix %*% Vector]) 
-  #precomputation of most time sensitive elements
-  #ptm <- proc.time() 
-  Gamma = Estim.Sigma.RG / Estim.Sigma.e
-  UT<-t(U)
-  D.0 <- (Gamma * S)  + diag(1, dim(X)[1], dim(X)[1])
-  inv.sqrt.D.0 <- diag(1/sqrt(diag(D.0)))
-  inv.D.0 = diag(1/diag(D.0))
-  un.n <- c(rep(1,dim(U)[1]))
-  Z <- 1/(( t(un.n) %*% (U %*% (inv.D.0 %*% (UT %*% un.n))))[1,1]) 
-  X.tilde <- inv.sqrt.D.0 %*% (UT %*% un.n)
-  Y.tilde <- inv.sqrt.D.0 %*% (UT %*% Y.trait)
-  s2 = Estim.Sigma.e
-  P.0.tilde = (diag(1, dim(U)[1], dim(U)[2])) - (X.tilde %*% Z) %*% ((t(X.tilde)))
-  #K.tilde2 <- inv.sqrt.D.0 %*% (UT %*% (K %*% (U %*% inv.sqrt.D.0))) 
-  #W1 <- P.0.tilde %*% K.tilde2 %*% P.0.tilde
-  PDU <- P.0.tilde %*% inv.sqrt.D.0 %*% UT
-  PDUT <- t(PDU)
-  #W1 <- P.0.tilde %*% inv.sqrt.D.0 %*% UT %*% K %*% U %*% inv.sqrt.D.0 %*% P.0.tilde #55 s
-  W1 <- PDU %*% K %*% PDUT # 44 s
-
-  #P.0.tilde is symmetric
-  #res <- P.0.tilde %*% Y.tilde
-  Q <- (t(Y.tilde) %*% (W1 %*% Y.tilde))/(2 * s2)
-  #print("time for Q computation, after associativity update")
-  #print(proc.time()-ptm)
-
-  #print("Q, Q2, Q-Q2"); print(c(Q, Q2, Q-Q2))
 
 
-  #W1 = P.0.tilde %*% K.tilde
-	#W1 = W1 %*% P.0.tilde/2
-  #K.tilde = inv.sqrt.D.0 %*% UT
+  #Attempt to reduce time to O(N^2), using PCA trick
   
-  #P.0.tilde = (diag(1, dim(U)[1], dim(U)[2])) - (X.tilde %*% Z) %*% ((t(X.tilde)))
-  #W1 = P.0.tilde %*% K.tilde2 %*% P.0.tilde/2#UPD: on average 0.5 s gain
-	out = Get_PValue.Modif(W1/2, Q)
+  if( length(freq.MAF) == 1){
+    w <- dbeta(freq.MAF, 1, 25)
+    K.sqrt <- w * t(X)
+  } else {
+    w <- vector(length = length(freq.MAF))
+    for (i in 1:length(freq.MAF)){
+      w[i] <- dbeta(freq.MAF[i], 1, 25)
+    }
+    w <- diag(w)
+    K.sqrt <- w %*% t(X)
+  }
+
+##### STEP 2: ASKAT score test statistic calculations #####
+
+#ptm <- proc.time()  
+#Gamma = Estim.Sigma.RG / Estim.Sigma.e
+#D.0 = (Gamma * S)  + diag(1, dim(X)[1], dim(X)[1])
+#inv.sqrt.D.0 = diag(1/sqrt(diag(D.0)))
+
+#K.tilde = inv.sqrt.D.0 %*% t(U)
+
+#un.n = c(rep(1,dim(U)[1]))
+#X.tilde = K.tilde %*% un.n
+#Y.tilde = K.tilde %*% Y.trait
+
+#K.tilde =  K.tilde %*% K %*% t(K.tilde)
+#UPD remove solve - replace with 1/
+#P.0.tilde = diag(1, dim(U)[1], dim(U)[2]) - ( X.tilde %*% solve( t(X.tilde) %*% X.tilde ) %*% t(X.tilde) )
+#P.0.tilde = diag(1, dim(U)[1], dim(U)[2]) - X.tilde %*% (((1 / ((t(X.tilde) %*% X.tilde)[1,1])) %*% t(X.tilde)))
+#res = P.0.tilde %*% Y.tilde
+#s2 = Estim.Sigma.e
+
+#Q = t(res) %*% K.tilde
+#Q = Q %*% res/(2 * s2)
+#print("time for Q computation")
+#print(proc.time()-ptm)
+
+#calculation of Q with associativity property used: O( [Matrix %*% Matrix] %*% Vector) > O( Matrix %*% [Matrix %*% Vector]) 
+#precomputation of most time sensitive elements
+#ptm <- proc.time() 
+Gamma = Estim.Sigma.RG / Estim.Sigma.e
+UT<-t(U)
+D.0 <- (Gamma * S)  + diag(1, dim(X)[1], dim(X)[1])
+inv.sqrt.D.0 <- diag(1/sqrt(diag(D.0)))
+inv.D.0 = diag(1/diag(D.0))
+un.n <- c(rep(1,dim(U)[1]))
+Z <- 1/(( t(un.n) %*% (U %*% (inv.D.0 %*% (UT %*% un.n))))[1,1]) 
+X.tilde <- inv.sqrt.D.0 %*% (UT %*% un.n)
+Y.tilde <- inv.sqrt.D.0 %*% (UT %*% Y.trait)
+s2 = Estim.Sigma.e
+P.0.tilde = (diag(1, dim(U)[1], dim(U)[2])) - (X.tilde %*% Z) %*% ((t(X.tilde)))
+#K.tilde2 <- inv.sqrt.D.0 %*% (UT %*% (K %*% (U %*% inv.sqrt.D.0))) 
+#W1 <- P.0.tilde %*% K.tilde2 %*% P.0.tilde
+#PDU <- P.0.tilde %*% inv.sqrt.D.0 %*% UT
+#PDUT <- t(PDU)
+#W1 <- P.0.tilde %*% inv.sqrt.D.0 %*% UT %*% K %*% U %*% inv.sqrt.D.0 %*% P.0.tilde #55 s
+RM <- ((K.sqrt %*% U) %*% inv.sqrt.D.0) %*%  P.0.tilde# 44 s
+W <- RM %*% t(RM)
+
+#P.0.tilde is symmetric
+#res <- P.0.tilde %*% Y.tilde
+Q <- (t(Y.tilde) %*% t(RM) %*% ((RM %*% Y.tilde)))/(2 * s2)
+#print("time for Q computation, after associativity update")
+#print(proc.time()-ptm)
+
+#print("Q, Q2, Q-Q2"); print(c(Q, Q2, Q-Q2))
+
+
+#W1 = P.0.tilde %*% K.tilde
+#W1 = W1 %*% P.0.tilde/2
+#K.tilde = inv.sqrt.D.0 %*% UT
+
+#P.0.tilde = (diag(1, dim(U)[1], dim(U)[2])) - (X.tilde %*% Z) %*% ((t(X.tilde)))
+#W1 = P.0.tilde %*% K.tilde2 %*% P.0.tilde/2#UPD: on average 0.5 s gain
+
+  
+  out = Get_PValue.Modif(W/2, Q)
+  print("new"); print(out$p.value)
 	pvalue.davies = out$p.value
 	lambda = out$lambda
 
@@ -398,8 +406,8 @@ path.FastLmm <- "fastlmmc"
 debug <- FALSE
 tmpDir <- '.'
 
-#load("./kin2.Rdata"); dataFile = "PedB.dat"
-load("./kin1.Rdata"); dataFile = "Ped_EX_ASKAT_NOMissdata.dat"
+load("./kin2.Rdata"); dataFile = "PedB.dat"
+#load("./kin1.Rdata"); dataFile = "Ped_EX_ASKAT_NOMissdata.dat"
 
 Ped  = read.csv(dataFile, sep="", header=FALSE );
 
