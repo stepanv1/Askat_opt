@@ -3,12 +3,13 @@
 # ASKAT Package
 #
 # By: Karim Oualkacha
-# Optimized: Stepan Grinek      																	2013
+# Optimized: Stepan Grinek      																	
 #-------------------------------------------------------------------------------
 
 library(GenABEL)
 library(nFactors)
 library(CompQuadForm)
+library(Matrix)
 #
 #-------------------------------------------------------------------------------
 # STEPs1-2 Checking for missing data and running fastlmm under the null model
@@ -84,64 +85,34 @@ STEPs12 <- function(Ped, kin1, Missing, tmpDir="." ) {
 #          This matrix is obtained from fastlmm once we adjust the null model in STEPs1-2.
 #
 #-------------------------------------------------------------------------------
-ASKAT <- function(Ped, Estim.Sigma.RG, Estim.Sigma.e, S, U) {
+ASKAT <- function(Ped, Estim.Sigma.RG, Estim.Sigma.e, S, U, pACC=1e-9) {
 	#####
 	Y.trait = Ped[,2]
 	X = as.matrix(Ped[,3:dim(Ped)[2]])
 
 ##### STEP 1: Calculation of weights matrix W and the matrix K =GWG #####
-ptm <- proc.time()	
 freq.MAF = apply(X, 2, mean)/2
     Geno.no.sparse = which(!freq.MAF==0)
     X = X[,Geno.no.sparse]
     freq.MAF = apply(X, 2, mean)/2
-print("time for MAF computation")
-print(proc.time()-ptm)
 
 
-
-  #Attempt to reduce time to O(N^2), using PCA trick
-  
-  if( length(freq.MAF) == 1){
-    w <- dbeta(freq.MAF, 1, 25)
-    K.sqrt <- w * t(X)
-  } else {
-    w <- vector(length = length(freq.MAF))
-    for (i in 1:length(freq.MAF)){
-      w[i] <- dbeta(freq.MAF[i], 1, 25)
-    }
-    w <- diag(w)
-    K.sqrt <- w %*% t(X)
+#start of the trick to reduce the dimensionality of the matrix
+if( length(freq.MAF) == 1){
+  w <- dbeta(freq.MAF, 1, 25)
+  K.sqrt <- w * t(X)
+} else {
+  w <- vector(length = length(freq.MAF))
+  for (i in 1:length(freq.MAF)){
+    w[i] <- dbeta(freq.MAF[i], 1, 25)
   }
+  w <- diag(w)
+  K.sqrt <- w %*% t(X)
+}
 
 ##### STEP 2: ASKAT score test statistic calculations #####
 
-#ptm <- proc.time()  
-#Gamma = Estim.Sigma.RG / Estim.Sigma.e
-#D.0 = (Gamma * S)  + diag(1, dim(X)[1], dim(X)[1])
-#inv.sqrt.D.0 = diag(1/sqrt(diag(D.0)))
 
-#K.tilde = inv.sqrt.D.0 %*% t(U)
-
-#un.n = c(rep(1,dim(U)[1]))
-#X.tilde = K.tilde %*% un.n
-#Y.tilde = K.tilde %*% Y.trait
-
-#K.tilde =  K.tilde %*% K %*% t(K.tilde)
-#UPD remove solve - replace with 1/
-#P.0.tilde = diag(1, dim(U)[1], dim(U)[2]) - ( X.tilde %*% solve( t(X.tilde) %*% X.tilde ) %*% t(X.tilde) )
-#P.0.tilde = diag(1, dim(U)[1], dim(U)[2]) - X.tilde %*% (((1 / ((t(X.tilde) %*% X.tilde)[1,1])) %*% t(X.tilde)))
-#res = P.0.tilde %*% Y.tilde
-#s2 = Estim.Sigma.e
-
-#Q = t(res) %*% K.tilde
-#Q = Q %*% res/(2 * s2)
-#print("time for Q computation")
-#print(proc.time()-ptm)
-
-#calculation of Q with associativity property used: O( [Matrix %*% Matrix] %*% Vector) > O( Matrix %*% [Matrix %*% Vector]) 
-#precomputation of most time sensitive elements
-#ptm <- proc.time() 
 Gamma = Estim.Sigma.RG / Estim.Sigma.e
 UT<-t(U)
 D.0 <- (Gamma * S)  + diag(1, dim(X)[1], dim(X)[1])
@@ -153,37 +124,22 @@ X.tilde <- inv.sqrt.D.0 %*% (UT %*% un.n)
 Y.tilde <- inv.sqrt.D.0 %*% (UT %*% Y.trait)
 s2 = Estim.Sigma.e
 P.0.tilde = (diag(1, dim(U)[1], dim(U)[2])) - (X.tilde %*% Z) %*% ((t(X.tilde)))
-#K.tilde2 <- inv.sqrt.D.0 %*% (UT %*% (K %*% (U %*% inv.sqrt.D.0))) 
-#W1 <- P.0.tilde %*% K.tilde2 %*% P.0.tilde
-#PDU <- P.0.tilde %*% inv.sqrt.D.0 %*% UT
-#PDUT <- t(PDU)
-#W1 <- P.0.tilde %*% inv.sqrt.D.0 %*% UT %*% K %*% U %*% inv.sqrt.D.0 %*% P.0.tilde #55 s
+
 RM <- ((K.sqrt %*% U) %*% inv.sqrt.D.0) %*%  P.0.tilde# 44 s
 W <- RM %*% t(RM)
 
-#P.0.tilde is symmetric
-#res <- P.0.tilde %*% Y.tilde
 Q <- (t(Y.tilde) %*% t(RM) %*% ((RM %*% Y.tilde)))/(2 * s2)
-#print("time for Q computation, after associativity update")
-#print(proc.time()-ptm)
-
-#print("Q, Q2, Q-Q2"); print(c(Q, Q2, Q-Q2))
 
 
-#W1 = P.0.tilde %*% K.tilde
-#W1 = W1 %*% P.0.tilde/2
-#K.tilde = inv.sqrt.D.0 %*% UT
 
-#P.0.tilde = (diag(1, dim(U)[1], dim(U)[2])) - (X.tilde %*% Z) %*% ((t(X.tilde)))
-#W1 = P.0.tilde %*% K.tilde2 %*% P.0.tilde/2#UPD: on average 0.5 s gain
 
-  
-  out = Get_PValue.Modif(W/2, Q)
-  print("new"); print(out$p.value)
-	pvalue.davies = out$p.value
-	lambda = out$lambda
+out = Get_PValue.Modif(W/2, Q, pACC)
+#print("new"); print(out$p.value)
+pvalue.davies <- out$p.value
+lambda <- out$lambda
+is_converge <- out$is_converge
 
-	return( list(pvalue.ASKAT = pvalue.davies, Q.ASKAT = Q, Polygenic.VC = Estim.Sigma.RG, Env.VC = Estim.Sigma.e, lambda = lambda) );
+	return( list(pvalue.ASKAT = pvalue.davies, Q.ASKAT = Q, Polygenic.VC = Estim.Sigma.RG, Env.VC = Estim.Sigma.e, lambda = lambda, is_converge = is_converge) );
 }
 
 #-------------------------------------------------------------------------------
@@ -215,49 +171,60 @@ Geno.FaST.LMM <- function(Geno, tpedFile){
 }
 
 #-------------------------------------------------------------------------------
-# Get lambda
+# Get lambda UPD: heuristics: "IDX2 <- which(lambda1 > mean(lambda1[IDX1])/1e+05)"
+# is removed to address accuracy issues
 #-------------------------------------------------------------------------------
 Get_Lambda <- function (K) {
-	#UPD: do not need eigenvectors
   out.s <- eigen(K, symmetric = TRUE, only.values = TRUE)
-  #out.s <- eigen(K, symmetric = TRUE)
   lambda1 <- out.s$values
-	IDX1 <- which(lambda1 >= 0)
-	IDX2 <- which(lambda1 > mean(lambda1[IDX1])/1e+05)
-	if (length(IDX2) == 0) {
-		stop("No Eigenvalue is bigger than 0!!")
-	}
-	lambda <- lambda1[IDX2]
-	return( lambda );
+  #filter out eigenvalues with numbers higher than rank of matrix (they are actually zeroes),
+  #since the number of non-zero eigenvalues must be less than or equal to the rank
+  lambda1<-lambda1[1:rankMatrix(K)[1]]
+  #cat("rank:",rankMatrix(K),"\n")
+  #print(lambda1)
+  IDX1 <- which(lambda1 >= 0)
+  #IDX2 <- which(lambda1 > mean(lambda1[IDX1])/1e+05)
+  if (length(IDX1) == 0) { fatalError("No Eigenvalue is bigger than 0!!") }
+  lambda <- lambda1[IDX1]
+  #print(lambda)
+  return( lambda );
 }
 
 #-------------------------------------------------------------------------------
 # Get p-value
-# Note: This function was taken from SKAT package
+# Note: This function was taken from SKAT package, modified as needed
 #-------------------------------------------------------------------------------
-Get_PValue.Modif <- function(K, Q){
-	lambda <- Get_Lambda(K)
-	n1 <- length(Q)
-	p.val <- rep(0, n1)
-	p.val.liu <- rep(0, n1)
-	is_converge <- rep(0, n1)
-	for (i in 1:n1) {
-		out <- davies(Q[i], lambda, acc = 10^(-6))
-		p.val[i] <- out$Qq
-		p.val.liu[i] <- liu(Q[i], lambda)
-		is_converge[i] <- 1
-
-		if (length(lambda) == 1) {
-			p.val[i] <- p.val.liu[i]
-		} else if (out$ifault != 0) {
-			is_converge[i] <- 0
-		}
-
-		if (p.val[i] > 1 || p.val[i] < 0) {
-			is_converge[i] <- 0
-			p.val[i] <- p.val.liu[i]
-		}
-	}
+Get_PValue.Modif <- function(K, Q, pACC){
+  #print(K)
+  lambda <- Get_Lambda(K)
+  p.val<-0
+  p.val.liu<-0
+  is_converge <- 0
+  
+  out <- davies(Q, lambda, acc = pACC)
+  p.val <- out$Qq
+  p.val.liu <- liu(Q, lambda)
+  
+  if (out$ifault==0){
+    is_converge <- 1} 
+  else{
+    is_converge <- 0}
+  
+  if ((length(lambda) == 1) | (is_converge == 0)) {
+    p.val <- p.val.liu
+  } 
+  
+  if (p.val > 1 || p.val < 0) {
+    is_converge <- 0
+  }
+  
+#-------------------------------------------------------------------------------
+# Fatal error
+#-------------------------------------------------------------------------------
+fatalError <- function(errStr)	{ 
+  errStr <- paste('FATAL ERROR:',  errStr, "\n");
+  stop( errStr ); 
+}
 
 	return(list(p.value = p.val, p.val.liu = p.val.liu, is_converge = is_converge, lambda = lambda))
 }
@@ -402,14 +369,20 @@ tmpFile <- function(name)	{ return( paste(tmpDir, name, sep="/") ); }
 # Default values
 #---
 
-path.FastLmm <- "fastlmmc"
+#path.FastLmm <- "fastlmmc"
+path.FastLmm<-"./fastlmmc"
 debug <- FALSE
 tmpDir <- '.'
+pACC<-1e-06
 
-load("./kin2.Rdata"); dataFile = "PedB.dat"
+#load("./kin2.Rdata"); dataFile = "PedB.dat"
 #load("./kin1.Rdata"); dataFile = "Ped_EX_ASKAT_NOMissdata.dat"
+load("./kinEst.RData"); dataFile = "PED_leptin.dat"; kin1<-kinEst
 
-Ped  = read.csv(dataFile, sep="", header=FALSE );
+Ped  <- read.csv(dataFile, sep="", header=FALSE );
+Ped <- Ped
+
+
 
 #------------             In thid STEP we Calculate:            ------------#
 #------------ the variance components under the null model   ---------------#
@@ -431,17 +404,24 @@ U = results.STEPs12$U
 #--------- This is the main ASKAT function for a window of 5 SNPs--------#
 #------------- This is what you should loop for your windows-------------#
 
-ptm <- proc.time()
-Rprof("a1.out")
-res.ASKAT = ASKAT(Ped, Estim.Sigma.RG, Estim.Sigma.e, S, U)
-Rprof(NULL, interval=1/5000)
-res.ASKAT
-print("Time for ASKAT")
-print(proc.time() - ptm)
-library(profr)
-plot(parse_rprof("a1.out", interval=0.001))
-k1<-parse_rprof("a1.out", interval=0.001)
-
+#ptm <- proc.time()
+#Rprof("a1.out")
+#res.ASKAT = ASKAT(Ped, Estim.Sigma.RG, Estim.Sigma.e, S, U)
+#Rprof(NULL, interval=1/1000)
+#res.ASKAT
+#print("Time for ASKAT")
+#print(proc.time() - ptm)
+#library(profr)
+#plot(parse_rprof("a1.out", interval=0.001))
+#k1<-parse_rprof("a1.out", interval=0.001)
+results <- list()
+#for (i in 1:753){
+for (i in 1:10){
+  res.ASKAT <- ASKAT(Ped[, c(1,2, c((4*i-3):(4*i)))], Estim.Sigma.RG, Estim.Sigma.e, S, U, pACC)#UPD add freq.MAF argument
+  results <-append(results, res.ASKAT)
+  print(i)
+  print(unlist(res.ASKAT))
+}
 
 
 
